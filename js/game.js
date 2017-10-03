@@ -1,9 +1,18 @@
 var DEBUG = true;
 
 var renderer;
+var rendererHUD;
 var scene;
-var camera;
+var camera, cameraHUD;
 var spotLight;
+
+var maze;
+
+var sq = 20; // Size of each space
+var ground;
+var outerWall = [];
+var post = [];
+var wall = [];
 
 var help = false;
 var helpRest = false;
@@ -19,23 +28,23 @@ var music_play = true;
 Physijs.scripts.worker = 'libs/physijs_worker.js';
 Physijs.scripts.ammo = 'ammo.js';
 
-var maze;
-
 function initGame()
 {
   scene = new Physijs.Scene();
   scene.setGravity(new THREE.Vector3(0, 0, -30));
 
-  maze = generateMaze(8,8);
-  if (DEBUG)
-    printMaze(maze);
+  maze = generateMaze(8, 8);
 
-  camera = new THREE.PerspectiveCamera(45,
-    window.innerWidth / window.innerHeight, 0.1, 1000);
-  setupRenderer();
+  createGround();
+  createWalls();
+
+  setupCameras();
+  setupRenderers();
   addSpotLight();
 
-  document.body.appendChild(renderer.domElement); // Output to the stream
+  document.body.appendChild(renderer.domElement);
+  document.getElementById("hud").appendChild(rendererHUD.domElement);
+
   render();
 }
 
@@ -51,6 +60,151 @@ function render()
 
   requestAnimationFrame(render);
   renderer.render(scene, camera);
+  rendererHUD.render(scene, cameraHUD);
+}
+
+function setupRenderers()
+{
+  renderer = new THREE.WebGLRenderer();
+  renderer.setClearColor(0x000000, 1.0);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+
+  rendererHUD = new THREE.WebGLRenderer();
+  rendererHUD.setClearColor(0x000000, 0);
+  rendererHUD.setSize(document.getElementById("hud").clientHeight,
+    document.getElementById("hud").clientHeight);
+  rendererHUD.shadowMap.enabled = true;
+}
+
+function setupCameras()
+{
+  camera = new THREE.PerspectiveCamera(45,
+    window.innerWidth / window.innerHeight, 0.1, 1000);
+
+  camera.position.set(-100, -100, 230);
+  camera.lookAt(scene.position);
+
+  cameraHUD = new THREE.PerspectiveCamera(45,
+    document.getElementById("hud").clientHeight
+      / document.getElementById("hud").clientHeight,
+    0.1, 1000);
+
+  cameraHUD.position.set(0, 0, 230);
+  cameraHUD.lookAt(scene.position);
+}
+
+function createGround()
+{
+  // var texture = new THREE.TextureLoader().load('images/ground.jpg');
+  var mat = new Physijs.createMaterial(
+                                  // new THREE.MeshStandardMaterial({map:texture}),
+                                  new THREE.MeshLambertMaterial({color:"blue"}),
+                                  0.4,
+                                  0.8);
+  var geo = new THREE.PlaneGeometry((maze.cols * sq),
+                                    (maze.rows * sq),
+                                    1);
+  ground = new Physijs.BoxMesh(geo, mat, 0);
+  ground.name = "Ground";
+
+  scene.add(ground);
+}
+
+function createWalls()
+{
+  // Create outer walls
+  for (var i = 0; i < 4; i++)
+  {
+    outerWall[i] = new Physijs.BoxMesh(
+      new THREE.BoxGeometry(((i < 2) ? sq * maze.cols - 1 : 1),               //
+                            ((i > 1) ? sq * maze.rows - 1 : 1),               //
+                            sq),
+      new Physijs.createMaterial(new THREE.MeshLambertMaterial({color:"green"}),
+                                 0.4,
+                                 0.8),
+      0);
+    outerWall[i].name = "OuterWall" + i;
+
+    outerWall[i].position.z = 0.5 * sq;
+    switch (i)
+    {
+      case 0:
+        outerWall[i].position.y =  0.5 * sq * maze.rows;
+        break;
+      case 1:
+        outerWall[i].position.y = -0.5 * sq * maze.rows;
+        break;
+      case 2:
+        outerWall[i].position.x =  0.5 * sq * maze.cols;
+        break;
+      case 3:
+        outerWall[i].position.x = -0.5 * sq * maze.cols;
+        break;
+    }
+
+    scene.add(outerWall[i]);
+  }
+
+  // Create posts connecting each wall
+  for (var i = 0; i < (maze.rows - 1); i++)
+  {
+    for (var j = 0; j < (maze.cols - 1); j++)
+    {
+      post[i] = new Physijs.BoxMesh(
+        new THREE.BoxGeometry(1, 1, sq),
+        new Physijs.createMaterial(
+          new THREE.MeshLambertMaterial({color:"black"}),
+          0.4,
+          0.8),
+        0);
+      post[i].name = "Post" + i;
+
+      post[i].position.x = (j * sq) - (0.5 * sq * (maze.cols - 2));
+      post[i].position.y = (0.5 * sq * (maze.rows - 2)) - (i * sq);
+      post[i].position.z = 0.5 * sq;
+
+      scene.add(post[i]);
+    }
+  }
+
+  // Create inner walls
+  for (var i = 0; i < maze.edges.length; i++)
+  {
+    if (!maze.edges[i].active)
+      continue;
+
+    var axis = maze.edges[i].b - maze.edges[i].a > 1 ? 'x' : 'y';
+
+    wall[i] = new Physijs.BoxMesh(
+      new THREE.BoxGeometry((axis === 'x' ? sq - 1 : 1),                      //
+                            (axis === 'y' ? sq - 1 : 1),                      //
+                            sq),
+      new Physijs.createMaterial(new THREE.MeshLambertMaterial({color:"white"}),
+                                 0.4,
+                                 0.8),
+      0);
+    wall[i].name = "Wall" + i;
+
+    wall[i].position.z = 0.5 * sq;
+
+    if (axis === 'x')
+    {
+      wall[i].position.x = (maze.nodes[maze.edges[i].a].c * sq)
+                           - (0.5 * sq * (maze.cols - 1));
+      wall[i].position.y = (0.5 * sq * (maze.rows - 2))
+                           - (maze.nodes[maze.edges[i].a].r * sq);
+    }
+    else // if (axis === 'y')
+    {
+      wall[i].position.x = (maze.nodes[maze.edges[i].a].c * sq)
+                           - (0.5 * sq * (maze.cols - 2));
+      wall[i].position.y = (0.5 * sq * (maze.rows - 1))
+                           - (maze.nodes[maze.edges[i].a].r * sq);
+    }
+
+    scene.add(wall[i]);
+  }
 }
 
 function checkGameStatus()
@@ -63,23 +217,15 @@ function keyboardControls()
   
 }
 
-function setupRenderer()
-{
-  renderer = new THREE.WebGLRenderer();
-  renderer.setClearColor(0x000000, 1.0);
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = true;
-}
-
 function addSpotLight()
 {
-  spotLight = new THREE.SpotLight(0xffbfb5);
+  spotLight = new THREE.SpotLight(0xffffff);
   spotLight.position.set(0, 0, 275);
   spotLight.shadow.cameraNear = 10;
   spotLight.shadow.cameraFar = 100;
   spotLight.castShadow = true;
-  spotLight.intensity = 1.5;
-  spotLight.penumbra = 1;
+  spotLight.intensity = 1.0;
+  // spotLight.penumbra = 1;
   scene.add(spotLight);
 }
 
@@ -89,15 +235,13 @@ function helpMenu()
   {
     document.getElementById('help').innerHTML =
       "<br><u>Controls</u>"
-      + "<br>WASD : Aim the cannon"
-      + "<br>&nbsp;&nbsp;&nbsp;F : Fire the cannon!"
-      + "<br>&nbsp;&nbsp;&nbsp;R : Reload"
+      + "<br>WASD : Movements"
       + "<br>&nbsp;&nbsp;&nbsp;M : Toggle music"
         + " (" + (music_play ? "ON" : "OFF") + ")";
   }
   else
     document.getElementById('help').innerHTML =
-      "<sf>Press H to toggle the help menu</sf>";
+      "Press H to toggle the help menu";
 }
 
 function gameOverScreen()
