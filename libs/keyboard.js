@@ -6,14 +6,19 @@ var Key =
   {
     _pressed: {},
 
-    A: 65,
-    D: 68,
-    F: 70,
-    H: 72,
-    M: 77,
-    R: 82,
-    S: 83,
-    W: 87,
+    SPACE      : 32,
+    LEFTARROW  : 37,
+    UPARROW    : 38,
+    RIGHTARROW : 39,
+    DOWNARROW  : 40,
+    A          : 65,
+    D          : 68,
+    F          : 70,
+    H          : 72,
+    M          : 77,
+    R          : 82,
+    S          : 83,
+    W          : 87,
 
     isDown: function(keyCode) {
       return this._pressed[keyCode];

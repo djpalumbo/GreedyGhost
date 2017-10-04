@@ -1,25 +1,38 @@
+// TODO
+//  Fix jumping mechanic
+//  Enemies
+//    Jump on top to stun/kill them?
+//  Add food
+//    Two in either corner (needed to proceed to next level)
+//    Randomly placed other foods (+ points)
+//  Scores
+//  Level progressions
+//    7, 14, 21...?
+//  Game over screen
+
 var DEBUG = true;
 
-var renderer;
-var rendererHUD;
+var renderer, rendererHUD;
 var scene;
 var camera, cameraHUD;
-var spotLight;
+var light = [], lightTarget = [];
 
+var rc = 14; // Number of rows & columns (the grid is square)
 var maze;
 
 var sq = 20; // Size of each space
-var ground;
-var outerWall = [];
-var post = [];
-var wall = [];
+var tile = [];
+var outerWall = [], post = []; wall = [];
+
+var radius = 5;
+var player;
+var jumpRest = false;
 
 var help = false;
 var helpRest = false;
 
 var score = 0;
 var gameOver = false;
-var total;
 
 var music;
 var music_play = true;
@@ -33,14 +46,16 @@ function initGame()
   scene = new Physijs.Scene();
   scene.setGravity(new THREE.Vector3(0, 0, -30));
 
-  maze = generateMaze(8, 8);
+  maze = generateMaze(rc, rc);
 
   createGround();
   createWalls();
 
   setupCameras();
   setupRenderers();
-  addSpotLight();
+  addLights();
+
+  createPlayer();
 
   document.body.appendChild(renderer.domElement);
   document.getElementById("hud").appendChild(rendererHUD.domElement);
@@ -53,6 +68,8 @@ function render()
   scene.simulate(); // Physics simulation
 
   keyboardControls();
+
+  cameraFollow();
 
   if (!helpRest) { showHelp(); helpRest = true; }
 
@@ -77,51 +94,78 @@ function setupRenderers()
   rendererHUD.shadowMap.enabled = true;
 }
 
+function cameraFollow()
+{
+  camera.rotation.y;
+
+  camera.position.x = player.position.x + (1 * radius) * Math.sin(camera.rotation.y);
+  camera.position.y = player.position.y - (1 * radius) * Math.cos(camera.rotation.y);
+  camera.position.z = player.position.z + (1.3 * radius);
+}
+
 function setupCameras()
 {
   camera = new THREE.PerspectiveCamera(45,
     window.innerWidth / window.innerHeight, 0.1, 1000);
 
-  camera.position.set(-100, -100, 230);
-  camera.lookAt(scene.position);
+  camera.rotation.x = Math.PI / 2;
+  if (!maze.edges[maze.edges.length - 1].active
+      && !maze.edges[maze.edges.length - maze.cols].active)
+    camera.rotation.y = Math.PI / 4;
+  else if (!maze.edges[maze.edges.length - 1].active)
+    camera.rotation.y = Math.PI / 2;
 
   cameraHUD = new THREE.PerspectiveCamera(45,
     document.getElementById("hud").clientHeight
       / document.getElementById("hud").clientHeight,
     0.1, 1000);
 
-  cameraHUD.position.set(0, 0, 230);
+  cameraHUD.position.set(0, 0, 25 * rc);
   cameraHUD.lookAt(scene.position);
 }
 
 function createGround()
 {
-  // var texture = new THREE.TextureLoader().load('images/ground.jpg');
+  var texture = new THREE.TextureLoader().load('images/dirt.png');
   var mat = new Physijs.createMaterial(
-                                  // new THREE.MeshStandardMaterial({map:texture}),
-                                  new THREE.MeshLambertMaterial({color:"blue"}),
-                                  0.4,
+                                  new THREE.MeshLambertMaterial({map:texture}),
+                                  0.8,
                                   0.8);
-  var geo = new THREE.PlaneGeometry((maze.cols * sq),
-                                    (maze.rows * sq),
-                                    1);
-  ground = new Physijs.BoxMesh(geo, mat, 0);
-  ground.name = "Ground";
+  var geo = new THREE.PlaneGeometry(sq, sq, 1);
 
-  scene.add(ground);
+  for (var i = 0; i < maze.rows; i++)
+  {
+    for (var j = 0; j < maze.cols; j++)
+    {
+      tile[i * maze.cols + j] = new Physijs.BoxMesh(geo, mat, 0);
+
+      tile[i * maze.cols + j].name = "Tile" + (i * maze.cols + j);
+
+      tile[i * maze.cols + j].position.x = (j * sq) - (0.5 * sq * (maze.cols - 1));
+      tile[i * maze.cols + j].position.y = (0.5 * sq * (maze.rows - 1)) - (i * sq);
+
+      scene.add(tile[i * maze.cols + j]);
+    }
+  }
 }
 
 function createWalls()
 {
+  var texture = new THREE.TextureLoader().load('images/stonewall.jpg',
+    function (texture)
+    {
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.offset.set(0, 0);
+      texture.repeat.set(maze.rows*4, maze.rows/4);
+    });
+
   // Create outer walls
   for (var i = 0; i < 4; i++)
   {
     outerWall[i] = new Physijs.BoxMesh(
-      new THREE.BoxGeometry(((i < 2) ? sq * maze.cols - 1 : 1),               //
-                            ((i > 1) ? sq * maze.rows - 1 : 1),               //
-                            sq),
-      new Physijs.createMaterial(new THREE.MeshLambertMaterial({color:"green"}),
-                                 0.4,
+      new THREE.BoxGeometry(sq * maze.cols - 1, 1, sq),
+      new Physijs.createMaterial(new THREE.MeshLambertMaterial({map:texture}),
+                                 0.0,
                                  0.8),
       0);
     outerWall[i].name = "OuterWall" + i;
@@ -130,43 +174,49 @@ function createWalls()
     switch (i)
     {
       case 0:
-        outerWall[i].position.y =  0.5 * sq * maze.rows;
+        outerWall[i].position.y =  0.5 * sq * maze.rows - 1;
         break;
       case 1:
-        outerWall[i].position.y = -0.5 * sq * maze.rows;
+        outerWall[i].position.y = -0.5 * sq * maze.rows + 1;
         break;
       case 2:
-        outerWall[i].position.x =  0.5 * sq * maze.cols;
+        outerWall[i].position.x =  0.5 * sq * maze.cols - 1;
+        outerWall[i].rotation.z = Math.PI / 2;
         break;
       case 3:
-        outerWall[i].position.x = -0.5 * sq * maze.cols;
+        outerWall[i].position.x = -0.5 * sq * maze.cols + 1;
+        outerWall[i].rotation.z = Math.PI / 2;
         break;
     }
 
     scene.add(outerWall[i]);
   }
 
+  texture = new THREE.TextureLoader().load('images/wood.jpg');
+
   // Create posts connecting each wall
   for (var i = 0; i < (maze.rows - 1); i++)
   {
     for (var j = 0; j < (maze.cols - 1); j++)
     {
-      post[i] = new Physijs.BoxMesh(
-        new THREE.BoxGeometry(1, 1, sq),
+      post[i * maze.cols + j] = new Physijs.BoxMesh(
+        new THREE.BoxGeometry(2, 2, sq),
         new Physijs.createMaterial(
-          new THREE.MeshLambertMaterial({color:"black"}),
-          0.4,
+          new THREE.MeshLambertMaterial({map:texture}),
+          0.0,
           0.8),
         0);
-      post[i].name = "Post" + i;
+      post[i * maze.cols + j].name = "Post" + (i * maze.cols + j);
 
-      post[i].position.x = (j * sq) - (0.5 * sq * (maze.cols - 2));
-      post[i].position.y = (0.5 * sq * (maze.rows - 2)) - (i * sq);
-      post[i].position.z = 0.5 * sq;
+      post[i * maze.cols + j].position.x = (j * sq) - (0.5 * sq * (maze.cols - 2));
+      post[i * maze.cols + j].position.y = (0.5 * sq * (maze.rows - 2)) - (i * sq);
+      post[i * maze.cols + j].position.z = 0.5 * sq;
 
-      scene.add(post[i]);
+      scene.add(post[i * maze.cols + j]);
     }
   }
+
+  texture = new THREE.TextureLoader().load('images/stonewall.jpg');
 
   // Create inner walls
   for (var i = 0; i < maze.edges.length; i++)
@@ -177,16 +227,15 @@ function createWalls()
     var axis = maze.edges[i].b - maze.edges[i].a > 1 ? 'x' : 'y';
 
     wall[i] = new Physijs.BoxMesh(
-      new THREE.BoxGeometry((axis === 'x' ? sq - 1 : 1),                      //
-                            (axis === 'y' ? sq - 1 : 1),                      //
-                            sq),
-      new Physijs.createMaterial(new THREE.MeshLambertMaterial({color:"white"}),
-                                 0.4,
-                                 0.8),
+      new THREE.BoxGeometry((axis === 'x' ? sq - 2 : 2),
+                            (axis === 'y' ? sq - 2 : 2),
+                            (sq - 2)),
+      new Physijs.createMaterial(new THREE.MeshPhongMaterial({map:texture}),
+                                 0.0, 0.8),
       0);
     wall[i].name = "Wall" + i;
 
-    wall[i].position.z = 0.5 * sq;
+    wall[i].position.z = 0.5 * (sq - 2);
 
     if (axis === 'x')
     {
@@ -201,32 +250,133 @@ function createWalls()
                            - (0.5 * sq * (maze.cols - 2));
       wall[i].position.y = (0.5 * sq * (maze.rows - 1))
                            - (maze.nodes[maze.edges[i].a].r * sq);
+      wall[i].rotation.x = Math.PI / 2;
     }
 
     scene.add(wall[i]);
   }
 }
 
-function checkGameStatus()
+function createPlayer()
 {
-  
+  var mat = new Physijs.createMaterial(
+    new THREE.MeshLambertMaterial({color:"white", opacity: 0.8,
+    transparent: true}), 0.8, 0.3);
+
+  var geo = new THREE.SphereGeometry(radius, 32, 32);
+
+  player = new Physijs.SphereMesh(geo, mat, 1);
+
+  player.name = "Player";
+
+  player.position.x = tile[tile.length - 1].position.x;
+  player.position.y = tile[tile.length - 1].position.y;
+  player.position.z = radius;
+
+  player.addEventListener('collision',
+    function (other_object, linear_velocity, angular_velocity)
+    {
+      if (other_object.name.includes("Tile"))
+        ;
+    });
+
+  scene.add(player);
+}
+
+function addLights()
+{
+  for (var i = 0; i < 5; i++)
+  {
+    light[i] = new THREE.SpotLight();
+    lightTarget[i] = new THREE.Object3D();
+
+    light[i].name = "Light" + i;
+
+    light[i].shadow.cameraNear = 10;
+    light[i].shadow.cameraFar = 100;
+    light[i].castShadow = true;
+
+    light[i].angle = 0.75;
+    light[i].intensity = 1.5;
+    light[i].penumbra = 0.1;
+
+    light[i].position.z = (3/8) * rc * sq;
+    switch (i)
+    {
+      case 0:
+        light[i].color = new THREE.Color(0xff7d14);
+        light[i].position.x = -(0.5 * sq * (maze.cols - 1));
+        light[i].position.y = (0.5 * sq * (maze.rows - 1));
+        lightTarget[i].position.x = -(0.25 * sq * (maze.cols - 1));
+        lightTarget[i].position.y = (0.25 * sq * (maze.rows - 1));
+        break;
+      case 1:
+        light[i].color = new THREE.Color(0x1481ff);
+        light[i].position.x = (0.5 * sq * (maze.cols - 1));
+        light[i].position.y = (0.5 * sq * (maze.rows - 1));
+        lightTarget[i].position.x = (0.25 * sq * (maze.cols - 1));
+        lightTarget[i].position.y = (0.25 * sq * (maze.rows - 1));
+        break;
+      case 2:
+        light[i].color = new THREE.Color(0xeb14ff);
+        light[i].position.x = -(0.5 * sq * (maze.cols - 1));
+        light[i].position.y = -(0.5 * sq * (maze.rows - 1));
+        lightTarget[i].position.x = -(0.25 * sq * (maze.cols - 1));
+        lightTarget[i].position.y = -(0.25 * sq * (maze.rows - 1));
+        break;
+      case 3:
+        light[i].color = new THREE.Color(0x4fff19);
+        light[i].position.x = (0.5 * sq * (maze.cols - 1));
+        light[i].position.y = -(0.5 * sq * (maze.rows - 1));
+        lightTarget[i].position.x = (0.25 * sq * (maze.cols - 1));
+        lightTarget[i].position.y = -(0.25 * sq * (maze.rows - 1));
+        break;
+      case 4:
+        light[i].intensity = 0.7;
+        break;
+    }
+
+    scene.add(lightTarget[i]);
+    light[i].target = lightTarget[i];
+
+    scene.add(light[i]);
+  }
 }
 
 function keyboardControls()
 {
-  
+  camera.position.x = player.position.x + (radius/2) * Math.sin(camera.rotation.y);
+  camera.position.y = player.position.y + (radius/2) * Math.cos(camera.rotation.y);
+
+  // Player motion controls
+  if (Key.isDown(Key.W)) //                                         Move forward
+    player.applyCentralImpulse(new THREE.Vector3(
+      -Math.sin(camera.rotation.y), Math.cos(camera.rotation.y), 0));
+  if (Key.isDown(Key.S)) //                                        Move backward
+    player.applyCentralImpulse(new THREE.Vector3(
+      Math.sin(camera.rotation.y), -Math.cos(camera.rotation.y), 0));
+  if (Key.isDown(Key.A)) //                                          Strafe left
+    player.applyCentralImpulse(new THREE.Vector3(
+      -Math.sin(Math.PI/2 + camera.rotation.y),
+      Math.cos(Math.PI/2 + camera.rotation.y), 0));
+  if (Key.isDown(Key.D)) //                                         Strafe right
+    player.applyCentralImpulse(new THREE.Vector3(
+      Math.sin(Math.PI/2 + camera.rotation.y),
+      -Math.cos(Math.PI/2 + camera.rotation.y), 0));
+  if (Key.isDown(Key.SPACE)) //                                             Jump
+    if (player.position.z === radius)
+      player.applyCentralImpulse(new THREE.Vector3(0, 0, sq/2));
+
+  // Player camera controls
+  if (Key.isDown(Key.LEFTARROW)) //                                    Turn left
+    camera.rotation.y += Math.PI / 60;
+  if (Key.isDown(Key.RIGHTARROW)) //                                   Turn right
+    camera.rotation.y -= Math.PI / 60;
 }
 
-function addSpotLight()
+function checkGameStatus()
 {
-  spotLight = new THREE.SpotLight(0xffffff);
-  spotLight.position.set(0, 0, 275);
-  spotLight.shadow.cameraNear = 10;
-  spotLight.shadow.cameraFar = 100;
-  spotLight.castShadow = true;
-  spotLight.intensity = 1.0;
-  // spotLight.penumbra = 1;
-  scene.add(spotLight);
+  
 }
 
 function helpMenu()
@@ -445,20 +595,6 @@ function isInEdges(maze, id_a, id_b) // Helper to printMaze()
 
 function getRandEdge(graph) // Helper to isConnectedNode()
 { return Math.floor(Math.random() * graph.edges.length); }
-
-//function printNodes(graph)
-//{
-//  for (var i = 0; i < graph.nodes.length; i++)
-//    console.log(graph.nodes[i]);
-//  console.log();
-//}
-//
-//function printEdges(graph)
-//{
-//  for (var i = 0; i < graph.edges.length; i++)
-//    console.log(graph.edges[i]);
-//  console.log();
-//}
 
 function showHelp()
 { setTimeout(function () { helpMenu(); helpRest = false; }, 100); }
