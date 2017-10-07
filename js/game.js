@@ -1,37 +1,37 @@
 // TODO
-//  Fix jumping mechanic
-//  Enemies
-//    Jump on top to stun/kill them?
-//  Add food
-//    Two in either corner (needed to proceed to next level)
-//    Randomly placed other foods (+ points)
-//  Scores
-//  Level progressions
-//    7, 14, 21...?
-//  Game over screen
+//  Enemy AI (A*)
 
-var DEBUG = true;
+function initGame()
+{ initLevel(4); }
 
 var renderer, rendererHUD;
 var scene;
 var camera, cameraHUD;
 var light = [], lightTarget = [];
 
-var rc = 14; // Number of rows & columns (the grid is square)
+var level;
+var rc;
 var maze;
 
 var sq = 20; // Size of each space
 var tile = [];
 var outerWall = [], post = []; wall = [];
 
+var firstrow, lastrow, firstcol, lastcol;
+
 var radius = 5;
 var player;
-var jumpRest = false;
+var jump = 1.2, jumpRest = false;
 
-var help = false;
-var helpRest = false;
+var monster = [];
+var monstMoveDir = Math.PI / 2;
 
-var score = 0;
+var diamond = [], diamond_edge = [];
+
+var help = false, helpRest = false;
+
+var alive = true;
+var score = 0, scoreStr = "";
 var gameOver = false;
 
 var music;
@@ -41,12 +41,37 @@ var music_play = true;
 Physijs.scripts.worker = 'libs/physijs_worker.js';
 Physijs.scripts.ammo = 'ammo.js';
 
-function initGame()
+function moveMonsters()
 {
+  for (var i = 0; i < monster.length; i++)
+  {
+    monster[i].__dirtyPosition = true;
+
+    // Floating effect
+    monster[i].position.z = (1/2) + radius + (1/2) * Math.cos(monstMoveDir);
+    monstMoveDir += 3 * Math.PI / 180;
+    if (monstMoveDir >= 2 * Math.PI)
+      monstMoveDir = 0;
+
+    // Actual movement
+    //
+  }
+}
+
+function initLevel(lvl)
+{
+  level = lvl;
+  rc = 3 * lvl;
+
   scene = new Physijs.Scene();
   scene.setGravity(new THREE.Vector3(0, 0, -30));
 
   maze = generateMaze(rc, rc);
+
+  firstrow =  (0.5 * sq * (maze.rows - 1));
+  lastrow  = -(0.5 * sq * (maze.rows - 1));
+  firstcol = -(0.5 * sq * (maze.cols - 1));
+  lastcol  =  (0.5 * sq * (maze.cols - 1));
 
   createGround();
   createWalls();
@@ -56,8 +81,10 @@ function initGame()
   addLights();
 
   createPlayer();
+  createMonsters();
+  createDiamonds();
 
-  document.body.appendChild(renderer.domElement);
+  document.getElementById("game").appendChild(renderer.domElement);
   document.getElementById("hud").appendChild(rendererHUD.domElement);
 
   render();
@@ -71,9 +98,18 @@ function render()
 
   cameraFollow();
 
-  if (!helpRest) { showHelp(); helpRest = true; }
+  moveMonsters();
+  spinDiamonds();
+  collectDiamonds();
+  updateScore()
 
-  if (!gameOver) { checkGameStatus(); }
+  if (!helpRest)
+  {
+    setTimeout(function () { helpMenu(); helpRest = false; }, 100);
+    helpRest = true;
+  }
+
+  checkGameStatus();
 
   requestAnimationFrame(render);
   renderer.render(scene, camera);
@@ -141,12 +177,19 @@ function createGround()
 
       tile[i * maze.cols + j].name = "Tile" + (i * maze.cols + j);
 
-      tile[i * maze.cols + j].position.x = (j * sq) - (0.5 * sq * (maze.cols - 1));
-      tile[i * maze.cols + j].position.y = (0.5 * sq * (maze.rows - 1)) - (i * sq);
+      tile[i * maze.cols + j].position.x = (j * sq) - lastcol;
+      tile[i * maze.cols + j].position.y = firstrow - (i * sq);
 
       scene.add(tile[i * maze.cols + j]);
     }
   }
+
+  tile[0].addEventListener('collision',
+    function (other_object, linear_velocity, angular_velocity)
+    {
+      if (other_object.name.includes("Player") && score > 1)
+        gameOver = true;
+    });
 }
 
 function createWalls()
@@ -156,14 +199,14 @@ function createWalls()
     {
       texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
       texture.offset.set(0, 0);
-      texture.repeat.set(maze.rows*4, maze.rows/4);
+      texture.repeat.set(maze.rows*2, maze.rows/2);
     });
 
   // Create outer walls
   for (var i = 0; i < 4; i++)
   {
     outerWall[i] = new Physijs.BoxMesh(
-      new THREE.BoxGeometry(sq * maze.cols - 1, 1, sq),
+      new THREE.BoxGeometry(sq * maze.cols - 1, 1, 2 * sq),
       new Physijs.createMaterial(new THREE.MeshLambertMaterial({map:texture}),
                                  0.0,
                                  0.8),
@@ -240,7 +283,7 @@ function createWalls()
     if (axis === 'x')
     {
       wall[i].position.x = (maze.nodes[maze.edges[i].a].c * sq)
-                           - (0.5 * sq * (maze.cols - 1));
+                           - lastcol;
       wall[i].position.y = (0.5 * sq * (maze.rows - 2))
                            - (maze.nodes[maze.edges[i].a].r * sq);
     }
@@ -248,7 +291,7 @@ function createWalls()
     {
       wall[i].position.x = (maze.nodes[maze.edges[i].a].c * sq)
                            - (0.5 * sq * (maze.cols - 2));
-      wall[i].position.y = (0.5 * sq * (maze.rows - 1))
+      wall[i].position.y = firstrow
                            - (maze.nodes[maze.edges[i].a].r * sq);
       wall[i].rotation.x = Math.PI / 2;
     }
@@ -276,11 +319,139 @@ function createPlayer()
   player.addEventListener('collision',
     function (other_object, linear_velocity, angular_velocity)
     {
-      if (other_object.name.includes("Tile"))
-        ;
+      if (other_object.name.includes("Monster"))
+      {
+        if (player.position.z > other_object.position.z + radius)
+        {
+          console.log("boing!");
+        }
+        else
+        {
+          console.log("owie!");
+          if (!gameOver)
+            alive = false;
+        }
+      }
     });
 
   scene.add(player);
+}
+
+function createMonsters()
+{
+  var mat = new Physijs.createMaterial(
+    new THREE.MeshLambertMaterial({color:"black", opacity: 0.8,
+    transparent: true}), 0.8, 0.3);
+
+  var geo = new THREE.SphereGeometry(radius, 32, 32);
+
+  for (var i = 0; i < level; i++)
+  {
+    monster[i] = new Physijs.SphereMesh(geo, mat, 1);
+
+    monster[i].name = "Monster" + i;
+
+    monster[i].position.z = radius;
+
+    switch (i)
+    {
+      case 0:
+        monster[i].position.x
+          = sq * getRandInt(0, Math.floor((maze.cols - 1) / 2)) - lastcol;
+        monster[i].position.y
+          = firstrow - sq * getRandInt(0, Math.floor((maze.rows - 1) / 2));
+        break;
+      case 1:
+        monster[i].position.x
+          = sq * getRandInt(Math.floor((maze.cols - 1) / 2) + 1, maze.cols - 1)
+            - lastcol;
+        monster[i].position.y
+          = firstrow - sq * getRandInt(0, Math.floor((maze.rows - 1) / 2));
+        break;
+      case 2:
+        monster[i].position.x
+          = sq * getRandInt(0, Math.floor((maze.cols - 1) / 2)) - lastcol;
+        monster[i].position.y
+          = firstrow
+            - sq * getRandInt(Math.floor((maze.rows - 1) / 2) + 1, maze.rows - 1);
+        break;
+      case 3:
+        monster[i].position.x
+          = sq * getRandInt(Math.floor((maze.cols - 1) / 2) + 1, maze.cols - 3)
+            - lastcol;
+        monster[i].position.y
+          = firstrow
+            - sq * getRandInt(Math.floor((maze.rows - 1) / 2) + 1, maze.rows - 3);
+        break;
+    }
+
+    scene.add(monster[i]);
+  }
+}
+
+function createDiamonds()
+{
+  var geo = new THREE.SphereGeometry((3/4) * radius, 4, 2);
+  var mesh = new THREE.MeshBasicMaterial({color: "blue", opacity: 0.8,
+    transparent: true});
+  var lgeo = new THREE.EdgesGeometry(geo);
+  var lmesh = new THREE.LineBasicMaterial({color: "black"});
+
+  for (var i = 0; i < 2; i++)
+  {
+    diamond[i] = new THREE.Mesh(geo, mesh);
+    diamond_edge[i] = new THREE.LineSegments(lgeo, lmesh);
+
+    diamond[i].name = "Diamond" + i;
+
+    diamond[i].position.z = diamond_edge[i].position.z = radius;
+
+    switch (i)
+    {
+      case 0:
+        diamond[i].position.x = diamond_edge[i].position.x = lastcol;
+        diamond[i].position.y = diamond_edge[i].position.y = firstrow;
+        break;
+      case 1:
+        diamond[i].position.x = diamond_edge[i].position.x = firstcol;
+        diamond[i].position.y = diamond_edge[i].position.y = lastrow;
+        break;
+    }
+
+    scene.add(diamond[i]);
+    scene.add(diamond_edge[i]);
+  }
+}
+
+function spinDiamonds()
+{
+  for (var i = 0; i < diamond.length; i++)
+  {
+    diamond[i].rotation.z += Math.PI / 180;
+    diamond_edge[i].rotation.z += Math.PI / 180;
+  }
+}
+
+function collectDiamonds()
+{
+  if (scene.getObjectByName("Diamond0")
+      && Math.abs(player.position.x - lastcol) < ((4/3) * radius)
+      && Math.abs(player.position.y - firstrow) < ((4/3) * radius))
+  {
+    scene.remove(diamond[0]);
+    scene.remove(diamond_edge[0]);
+    score++;
+    scoreStr += "&nbsp;&#9672;";
+  }
+  else if (scene.getObjectByName("Diamond1")
+           && Math.abs(player.position.x - firstcol) < ((4/3) * radius)
+           && Math.abs(player.position.y - lastrow) < ((4/3) * radius))
+  {
+    scene.remove(diamond[1]);
+    scene.remove(diamond_edge[1]);
+    score++;
+    scoreStr += "&nbsp;&#9672;";
+  }
 }
 
 function addLights()
@@ -305,31 +476,31 @@ function addLights()
     {
       case 0:
         light[i].color = new THREE.Color(0xff7d14);
-        light[i].position.x = -(0.5 * sq * (maze.cols - 1));
-        light[i].position.y = (0.5 * sq * (maze.rows - 1));
-        lightTarget[i].position.x = -(0.25 * sq * (maze.cols - 1));
-        lightTarget[i].position.y = (0.25 * sq * (maze.rows - 1));
+        light[i].position.x = firstcol;
+        light[i].position.y = firstrow;
+        lightTarget[i].position.x = firstcol / 2;
+        lightTarget[i].position.y = firstrow / 2;
         break;
       case 1:
         light[i].color = new THREE.Color(0x1481ff);
-        light[i].position.x = (0.5 * sq * (maze.cols - 1));
-        light[i].position.y = (0.5 * sq * (maze.rows - 1));
-        lightTarget[i].position.x = (0.25 * sq * (maze.cols - 1));
-        lightTarget[i].position.y = (0.25 * sq * (maze.rows - 1));
+        light[i].position.x = lastcol;
+        light[i].position.y = firstrow;
+        lightTarget[i].position.x = lastcol / 2;
+        lightTarget[i].position.y = firstrow / 2;
         break;
       case 2:
         light[i].color = new THREE.Color(0xeb14ff);
-        light[i].position.x = -(0.5 * sq * (maze.cols - 1));
-        light[i].position.y = -(0.5 * sq * (maze.rows - 1));
-        lightTarget[i].position.x = -(0.25 * sq * (maze.cols - 1));
-        lightTarget[i].position.y = -(0.25 * sq * (maze.rows - 1));
+        light[i].position.x = firstcol;
+        light[i].position.y = lastrow;
+        lightTarget[i].position.x = firstcol / 2;
+        lightTarget[i].position.y = lastrow / 2;
         break;
       case 3:
         light[i].color = new THREE.Color(0x4fff19);
-        light[i].position.x = (0.5 * sq * (maze.cols - 1));
-        light[i].position.y = -(0.5 * sq * (maze.rows - 1));
-        lightTarget[i].position.x = (0.25 * sq * (maze.cols - 1));
-        lightTarget[i].position.y = -(0.25 * sq * (maze.rows - 1));
+        light[i].position.x = lastcol;
+        light[i].position.y = lastrow;
+        lightTarget[i].position.x = lastcol / 2;
+        lightTarget[i].position.y = lastrow / 2;
         break;
       case 4:
         light[i].intensity = 0.7;
@@ -345,9 +516,6 @@ function addLights()
 
 function keyboardControls()
 {
-  camera.position.x = player.position.x + (radius/2) * Math.sin(camera.rotation.y);
-  camera.position.y = player.position.y + (radius/2) * Math.cos(camera.rotation.y);
-
   // Player motion controls
   if (Key.isDown(Key.W)) //                                         Move forward
     player.applyCentralImpulse(new THREE.Vector3(
@@ -364,19 +532,81 @@ function keyboardControls()
       Math.sin(Math.PI/2 + camera.rotation.y),
       -Math.cos(Math.PI/2 + camera.rotation.y), 0));
   if (Key.isDown(Key.SPACE)) //                                             Jump
-    if (player.position.z === radius)
-      player.applyCentralImpulse(new THREE.Vector3(0, 0, sq/2));
+    if (!jumpRest)
+    {
+      if (player.position.z < radius + 0.1)
+        player.applyCentralImpulse(new THREE.Vector3(0, 0, jump * sq));
+
+      jumpRest = true;
+
+      setTimeout(function () { jumpRest = false; }, 400);
+    }
 
   // Player camera controls
-  if (Key.isDown(Key.LEFTARROW)) //                                    Turn left
+  if (Key.isDown(Key.LEFTARROW)) //                                    Look left
     camera.rotation.y += Math.PI / 60;
-  if (Key.isDown(Key.RIGHTARROW)) //                                   Turn right
+  if (Key.isDown(Key.RIGHTARROW)) //                                  Look right
     camera.rotation.y -= Math.PI / 60;
+
+  // Show help menu
+  if (Key.isDown(Key.H))
+    if (!helpRest) { help = !help; }
+
+  // Toggle music on/off
+  //if (Key.isDown(Key.M))
+  //{
+  //  music_play = !music_play;
+  //  if (music_play)
+  //    music.play();
+  //  else
+  //    music.pause();
+  //}
+}
+
+function updateScore()
+{
+  if (gameOver)
+    document.getElementById('score').innerHTML = "Score:<lg>"
+      + scoreStr + "</lg>";
+  else
+  {
+    if (score === 0)
+      document.getElementById('score').innerHTML = "Score: <lg>-"
+        + "</lg><br><sm>&nbspCollect the diamonds!</sm>";
+    else if (score === 1)
+      document.getElementById('score').innerHTML = "Score:<lg>"
+        + scoreStr + "</lg><br><sm>&nbspOnly one diamond left!</sm>";
+    else if (score === 2)
+      document.getElementById('score').innerHTML = "Score:<lg>"
+        + scoreStr + "</lg><br><sm>&nbspGet to the finish!</sm>";
+  }
 }
 
 function checkGameStatus()
 {
-  
+  if (gameOver)
+  {
+    if (alive)
+    {
+      gameOverScreen();
+      jump = 1.8;
+    }
+    else // if (!alive)
+    {
+      gameOverScreen();
+    }
+  }
+}
+
+function gameOverScreen()
+{
+  if (alive)
+    document.getElementById('gameOver').innerHTML =
+      "<br>YOU WIN";
+  else
+    document.getElementById('gameOver').innerHTML =
+      "<br>YOU LOSE"
+      + "<br>Refresh to try again!";
 }
 
 function helpMenu()
@@ -384,32 +614,28 @@ function helpMenu()
   if (help)
   {
     document.getElementById('help').innerHTML =
-      "<br><u>Controls</u>"
-      + "<br>WASD : Movements"
-      + "<br>&nbsp;&nbsp;&nbsp;M : Toggle music"
-        + " (" + (music_play ? "ON" : "OFF") + ")";
+      "<br><u>Hints</u>"
+      + "<br>Collect the diamonds"
+        + "<br>&nbsp;in each corner,"
+      + "<br>&nbsp;then get to the far"
+        + "<br>&nbsp;corner to win!</br>"
+      + "<br>Jump on top of an "
+        + "<br>&nbsp;enemy to avoid harm!</br>"
+      + "<br><u>Controls</u>"
+      + "<br>Arrow keys&nbsp;: Camera"
+      + "<br>&nbsp;&nbsp;&nbsp;WASD&nbsp;&nbsp;&nbsp; : Movements"
+      + "<br>&nbsp;Spacebar&nbsp;&nbsp;: Jump"
+      + "<br>&nbsp;&nbsp;&nbsp;&nbsp;M&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+        + ": Toggle music (" + (music_play ? "ON" : "OFF") + ")";
   }
   else
     document.getElementById('help').innerHTML =
       "Press H to toggle the help menu";
 }
 
-function gameOverScreen()
+function loadSounds()
 {
-  if (gameOver)
-  {
-    if (score === 4)
-      document.getElementById('gameOver').innerHTML =
-        "<br><big>YOU WIN</big>"
-        + "<br>&nbsp&nbspTotals:"
-        + "<br>&nbsp&nbsp&nbsp" + score + " points"
-        + "<br>&nbsp&nbsp<u>&nbsp" + (total - score) + " balls left&nbsp</u>"
-        + "<br>&nbsp&nbsp&nbsp" + total + " overall";
-    else
-      document.getElementById('gameOver').innerHTML =
-        "<br><big>YOU LOSE</big>"
-        + "<br>Refresh to try again!";
-  }
+  music = new Audio("sounds/music.wav");
 }
 
 function playMusic()
@@ -423,11 +649,6 @@ function playMusic()
     }
   }, false);
   music.play();
-}
-
-function loadSounds()
-{
-  music = new Audio("sounds/music.wav");
 }
 
 function generateMaze(num_rows, num_cols) // Inverted graph - edges are walls
@@ -596,15 +817,6 @@ function isInEdges(maze, id_a, id_b) // Helper to printMaze()
 function getRandEdge(graph) // Helper to isConnectedNode()
 { return Math.floor(Math.random() * graph.edges.length); }
 
-function showHelp()
-{ setTimeout(function () { helpMenu(); helpRest = false; }, 100); }
-
-function updateScore()
-{ document.getElementById('score').innerHTML = "Score: " + score; }
-
-function getRandomFloat(min, max)
-{ return min + (Math.random() * (max - min)); }
-
-function getRandomInt(min, max)
+function getRandInt(min, max)
 { return Math.floor(Math.random() * (max - min + 1)) + min; }
 

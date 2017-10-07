@@ -11,6 +11,9 @@ body
                  1px  1px 0 #000;
 }
 
+sm { font-size: 20px; }
+lg { font-size: 36px; }
+
 #hud
 {
   border   : 1px solid white;
@@ -45,6 +48,7 @@ body
 
 #gameOver
 {
+  font-size : 44px;
   position  : fixed;
   top       : 50%;
   left      : 50%;
