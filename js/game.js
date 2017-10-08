@@ -28,8 +28,10 @@ var monster = {
 var mvDist = sq / Math.pow(2, 7);
 var speedInc = false;
 var monstFloat = Math.PI / 2;
+var whoKill;
 
 var diamond = [], diamond_edge = [];
+var tombstone, tombstone_edge;
 
 var help = false, helpRest = false;
 
@@ -61,6 +63,7 @@ function initLevel(lvl)
 
   createGround();
   createWalls();
+  createTombstone();
 
   setupCameras();
   setupRenderers();
@@ -69,6 +72,9 @@ function initLevel(lvl)
   createPlayer();
   createMonsters();
   createDiamonds();
+
+  loadSounds();
+  playMusic()
 
   document.getElementById("game").appendChild(renderer.domElement);
   document.getElementById("hud").appendChild(rendererHUD.domElement);
@@ -82,7 +88,10 @@ function render()
 
   keyboardControls();
 
-  cameraFollow();
+  if (!whoKill)
+    cameraFollow(player);
+  else
+    cameraFollow(whoKill);
 
   floatMonsters();
   moveMonsters();
@@ -117,13 +126,13 @@ function setupRenderers()
   rendererHUD.shadowMap.enabled = true;
 }
 
-function cameraFollow()
+function cameraFollow(target)
 {
   camera.rotation.y;
 
-  camera.position.x = player.position.x + (1 * radius) * Math.sin(camera.rotation.y);
-  camera.position.y = player.position.y - (1 * radius) * Math.cos(camera.rotation.y);
-  camera.position.z = player.position.z + (1.3 * radius);
+  camera.position.x = target.position.x + (1 * radius) * Math.sin(camera.rotation.y);
+  camera.position.y = target.position.y - (1 * radius) * Math.cos(camera.rotation.y);
+  camera.position.z = target.position.z + (1.3 * radius);
 }
 
 function setupCameras()
@@ -174,8 +183,11 @@ function createGround()
   tile[0].addEventListener('collision',
     function (other_object, linear_velocity, angular_velocity)
     {
-      if (other_object.name.includes("Player") && score > 1)
+      if (other_object.name.includes("Player") && score > 1 && !gameOver)
+      {
         gameOver = true;
+        bell.play();
+      }
     });
 }
 
@@ -287,6 +299,37 @@ function createWalls()
   }
 }
 
+function createTombstone()
+{
+  var shape = new THREE.Shape();
+  shape.moveTo(0,0);
+  shape.lineTo(0, 4);
+  shape.lineTo(8, 4);
+  shape.lineTo(8, 0);
+  shape.lineTo(0, 0);
+
+  var extrudeSettings = {
+    steps: 1,
+    amount: 1,
+    bevelEnabled: true,
+    bevelThickness: 1,
+    bevelSize: 1,
+    bevelSegments: 1
+  };
+
+  tombstone = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, extrudeSettings),
+    new THREE.MeshLambertMaterial({color: "grey"}));
+
+  tombstone.position.x = firstcol;
+  tombstone.position.y = firstrow;
+
+  tombstone.rotation.x = Math.PI / 2;
+  tombstone.rotation.y = Math.PI / 4;
+  tombstone.rotation.z = Math.PI / 2;
+
+  scene.add(tombstone);
+}
+
 function createPlayer()
 {
   var mat = new Physijs.createMaterial(
@@ -308,15 +351,12 @@ function createPlayer()
     {
       if (other_object.name.includes("Monster"))
       {
-        if (player.position.z > other_object.position.z + radius)
+        if (player.position.z < other_object.position.z + radius && !gameOver)
         {
-          console.log("boing!");
-        }
-        else
-        {
-          console.log("owie!");
-          if (!gameOver)
-            alive = false;
+          alive = false;
+          boo.play();
+          whoKill = other_object;
+          scene.remove(player);
         }
       }
     });
@@ -592,7 +632,7 @@ function floatMonsters()
 function createDiamonds()
 {
   var geo = new THREE.SphereGeometry((3/4) * radius, 4, 2);
-  var mesh = new THREE.MeshBasicMaterial({color: "blue", opacity: 0.6,
+  var mesh = new THREE.MeshLambertMaterial({color: "white", opacity: 0.6,
     transparent: true});
   var lgeo = new THREE.EdgesGeometry(geo);
   var lmesh = new THREE.LineBasicMaterial({color: "black"});
@@ -640,6 +680,7 @@ function collectDiamonds()
   {
     scene.remove(diamond[0]);
     scene.remove(diamond_edge[0]);
+    treasure.play();
     score++;
     scoreStr += "&nbsp;&#9672;";
     speedInc = true;
@@ -650,6 +691,7 @@ function collectDiamonds()
   {
     scene.remove(diamond[1]);
     scene.remove(diamond_edge[1]);
+    treasure.play();
     score++;
     scoreStr += "&nbsp;&#9672;";
     speedInc = true;
@@ -719,24 +761,28 @@ function addLights()
 function keyboardControls()
 {
   // Player motion controls
-  if (Key.isDown(Key.W) && player.position.z < radius + 0.1) //     Move forward
+  if (Key.isDown(Key.W)) //                                         Move forward
+    if (player.position.z < radius + 0.1 || (gameOver && alive))
     player.applyCentralImpulse(new THREE.Vector3(
       -Math.sin(camera.rotation.y), Math.cos(camera.rotation.y), 0));
-  if (Key.isDown(Key.S) && player.position.z < radius + 0.1) //    Move backward
+  if (Key.isDown(Key.S)) //                                        Move backward
+    if (player.position.z < radius + 0.1 || (gameOver && alive))
     player.applyCentralImpulse(new THREE.Vector3(
       Math.sin(camera.rotation.y), -Math.cos(camera.rotation.y), 0));
-  if (Key.isDown(Key.A) && player.position.z < radius + 0.1) //      Strafe left
+  if (Key.isDown(Key.A)) //                                          Strafe left
+    if (player.position.z < radius + 0.1 || (gameOver && alive))
     player.applyCentralImpulse(new THREE.Vector3(
       -Math.sin(Math.PI/2 + camera.rotation.y),
       Math.cos(Math.PI/2 + camera.rotation.y), 0));
-  if (Key.isDown(Key.D) && player.position.z < radius + 0.1) //     Strafe right
+  if (Key.isDown(Key.D)) //                                         Strafe right
+    if (player.position.z < radius + 0.1 || (gameOver && alive))
     player.applyCentralImpulse(new THREE.Vector3(
       Math.sin(Math.PI/2 + camera.rotation.y),
       -Math.cos(Math.PI/2 + camera.rotation.y), 0));
   if (Key.isDown(Key.SPACE)) //                                             Jump
     if (!jumpRest)
     {
-      if (player.position.z < radius + 0.1)
+      if (player.position.z < radius + 0.1 || (gameOver && alive))
         player.applyCentralImpulse(new THREE.Vector3(0, 0, jump * sq));
 
       jumpRest = true;
@@ -755,14 +801,14 @@ function keyboardControls()
     if (!helpRest) { help = !help; }
 
   // Toggle music on/off
-  //if (Key.isDown(Key.M))
-  //{
-  //  music_play = !music_play;
-  //  if (music_play)
-  //    music.play();
-  //  else
-  //    music.pause();
-  //}
+  if (Key.isDown(Key.M))
+  {
+   music_play = !music_play;
+   if (music_play)
+     music.play();
+   else
+     music.pause();
+  }
 }
 
 function updateScore()
@@ -839,7 +885,10 @@ function helpMenu()
 
 function loadSounds()
 {
-  music = new Audio("sounds/music.wav");
+  boo = new Audio("sounds/boo.wav");
+  treasure = new Audio("sounds/treasure.wav");
+  bell = new Audio("sounds/bell.wav");
+  music = new Audio("sounds/music.mp3");
 }
 
 function playMusic()
