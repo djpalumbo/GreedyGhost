@@ -18,8 +18,8 @@ lg { font-size: 36px; }
 {
   border   : 1px solid white;
   position : absolute;
-  width    : 200px;
-  height   : 200px;
+  width    : 30vh;
+  height   : 30vh;
   top      : 5px;
   right    : 5px;
   z-index  : 101;
@@ -48,12 +48,13 @@ lg { font-size: 36px; }
 
 #gameOver
 {
-  font-size : 44px;
-  position  : fixed;
-  top       : 50%;
-  left      : 50%;
-  transform : translate(-50%, -50%);
-  z-index   : 100;
+  font-size  : 50px;
+  text-align : center;
+  position   : fixed;
+  top        : 50%;
+  left       : 50%;
+  transform  : translate(-50%, -50%);
+  z-index    : 100;
 }
 
 #credits

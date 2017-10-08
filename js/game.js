@@ -1,6 +1,3 @@
-// TODO
-//  Enemy AI (A*)
-
 function initGame()
 { initLevel(4); }
 
@@ -23,8 +20,14 @@ var radius = 5;
 var player;
 var jump = 1.2, jumpRest = false;
 
-var monster = [];
-var monstMoveDir = Math.PI / 2;
+var monster = {
+                arr  : [],
+                dir  : [], // N S E W
+                mv   : []
+              };
+var mvDist = sq / Math.pow(2, 7);
+var speedInc = false;
+var monstFloat = Math.PI / 2;
 
 var diamond = [], diamond_edge = [];
 
@@ -40,23 +43,6 @@ var music_play = true;
 // Make Physijs work correctly
 Physijs.scripts.worker = 'libs/physijs_worker.js';
 Physijs.scripts.ammo = 'ammo.js';
-
-function moveMonsters()
-{
-  for (var i = 0; i < monster.length; i++)
-  {
-    monster[i].__dirtyPosition = true;
-
-    // Floating effect
-    monster[i].position.z = (1/2) + radius + (1/2) * Math.cos(monstMoveDir);
-    monstMoveDir += 3 * Math.PI / 180;
-    if (monstMoveDir >= 2 * Math.PI)
-      monstMoveDir = 0;
-
-    // Actual movement
-    //
-  }
-}
 
 function initLevel(lvl)
 {
@@ -98,6 +84,7 @@ function render()
 
   cameraFollow();
 
+  floatMonsters();
   moveMonsters();
   spinDiamonds();
   collectDiamonds();
@@ -303,7 +290,7 @@ function createWalls()
 function createPlayer()
 {
   var mat = new Physijs.createMaterial(
-    new THREE.MeshLambertMaterial({color:"white", opacity: 0.8,
+    new THREE.MeshLambertMaterial({color:"white", opacity: 0.7,
     transparent: true}), 0.8, 0.3);
 
   var geo = new THREE.SphereGeometry(radius, 32, 32);
@@ -347,52 +334,265 @@ function createMonsters()
 
   for (var i = 0; i < level; i++)
   {
-    monster[i] = new Physijs.SphereMesh(geo, mat, 1);
+    monster.arr[i] = new Physijs.SphereMesh(geo, mat, 1);
 
-    monster[i].name = "Monster" + i;
+    monster.arr[i].name = "Monster" + i;
 
-    monster[i].position.z = radius;
+    monster.arr[i].position.z = radius;
 
     switch (i)
     {
       case 0:
-        monster[i].position.x
+        monster.arr[i].position.x
           = sq * getRandInt(0, Math.floor((maze.cols - 1) / 2)) - lastcol;
-        monster[i].position.y
+        monster.arr[i].position.y
           = firstrow - sq * getRandInt(0, Math.floor((maze.rows - 1) / 2));
         break;
       case 1:
-        monster[i].position.x
+        monster.arr[i].position.x
           = sq * getRandInt(Math.floor((maze.cols - 1) / 2) + 1, maze.cols - 1)
             - lastcol;
-        monster[i].position.y
+        monster.arr[i].position.y
           = firstrow - sq * getRandInt(0, Math.floor((maze.rows - 1) / 2));
         break;
       case 2:
-        monster[i].position.x
+        monster.arr[i].position.x
           = sq * getRandInt(0, Math.floor((maze.cols - 1) / 2)) - lastcol;
-        monster[i].position.y
+        monster.arr[i].position.y
           = firstrow
             - sq * getRandInt(Math.floor((maze.rows - 1) / 2) + 1, maze.rows - 1);
         break;
       case 3:
-        monster[i].position.x
+        monster.arr[i].position.x
           = sq * getRandInt(Math.floor((maze.cols - 1) / 2) + 1, maze.cols - 3)
             - lastcol;
-        monster[i].position.y
+        monster.arr[i].position.y
           = firstrow
             - sq * getRandInt(Math.floor((maze.rows - 1) / 2) + 1, maze.rows - 3);
         break;
     }
 
-    scene.add(monster[i]);
+    monster.dir[i] = null;
+
+    monster.mv[i] = false;
+
+    scene.add(monster.arr[i]);
+  }
+}
+
+function moveMonsters()
+{
+  for (var i = 0; i < monster.arr.length; i++)
+  {
+    monster.mv[i] = isMoving(i);
+
+    if (!monster.mv[i])
+    {
+      if (speedInc)
+      {
+        mvDist *= 2;
+        speedInc = false;
+      }
+
+      monster.dir[i] = getNextDir(i);
+    }
+
+    moveMnstr(i);
+  }
+}
+
+function getNextDir(mNo)
+{
+  if (monster.dir[mNo] === null)
+  {
+    var psblDirs = getRandDirs(['N', 'S', 'E', 'W']);
+
+    if (canMoveDir(mNo, psblDirs[0]))
+      return psblDirs[0];
+    else if (canMoveDir(mNo, psblDirs[1]))
+      return psblDirs[1];
+    else if (canMoveDir(mNo, psblDirs[2]))
+      return psblDirs[2];
+    else
+      return psblDirs[3];
+  }
+  else if (canMoveDir(mNo, monster.dir[mNo]))
+  {
+    var psblDirs;
+    switch (monster.dir[mNo])
+    {
+      case 'N':
+        psblDirs = ['N', 'E', 'W'];
+        break;
+      case 'S':
+        psblDirs = ['S', 'E', 'W'];
+        break;
+      case 'E':
+        psblDirs = ['N', 'S', 'E'];
+        break;
+      case 'W':
+        psblDirs = ['N', 'S', 'W'];
+        break;
+    }
+
+    psblDirs = getRandDirs(psblDirs);
+
+    if (canMoveDir(mNo, psblDirs[0]))
+      return psblDirs[0];
+    else if (canMoveDir(mNo, psblDirs[1]))
+      return psblDirs[1];
+    else
+      return psblDirs[2];
+  }
+  else
+  {
+    var nextDir = getRandInt(0, 1);
+
+    switch (monster.dir[mNo])
+    {
+      case 'N':
+        if (canMoveDir(mNo, (nextDir ? 'E' : 'W')))
+          return (nextDir ? 'E' : 'W');
+        else if (canMoveDir(mNo, (nextDir ? 'W' : 'E')))
+          return (nextDir ? 'W' : 'E');
+        else
+          return 'S';
+      case 'S':
+        if (canMoveDir(mNo, (nextDir ? 'E' : 'W')))
+          return (nextDir ? 'E' : 'W');
+        else if (canMoveDir(mNo, (nextDir ? 'W' : 'E')))
+          return (nextDir ? 'W' : 'E');
+        else
+          return 'N';
+      case 'E':
+        if (canMoveDir(mNo, (nextDir ? 'N' : 'S')))
+          return (nextDir ? 'N' : 'S');
+        else if (canMoveDir(mNo, (nextDir ? 'S' : 'N')))
+          return (nextDir ? 'S' : 'N');
+        else
+          return 'W';
+      case 'W':
+        if (canMoveDir(mNo, (nextDir ? 'N' : 'S')))
+          return (nextDir ? 'N' : 'S');
+        else if (canMoveDir(mNo, (nextDir ? 'S' : 'N')))
+          return (nextDir ? 'S' : 'N');
+        else
+          return 'E';
+    }
+  }
+}
+
+function canMoveDir(mNo, dir)
+{
+  var xTile = getXTile(mNo);
+  var yTile = getYTile(mNo);
+
+  if (dir === 'N' && yTile === 0)
+    return false;
+  if (dir === 'S' && yTile === maze.rows - 1)
+    return false;
+  if (dir === 'E' && xTile === maze.cols - 1)
+    return false;
+  if (dir === 'W' && xTile === 0)
+    return false;
+
+  var tileNo = getTileNo(xTile, yTile);
+  var edgeNo;
+
+  switch (dir)
+  {
+    case 'N':
+      edgeNo = (yTile - 1) * (maze.rows * 2 - 1) + (xTile * 2)
+               + (xTile != maze.cols - 1 ? 1 : 0);
+      break;
+    case 'S':
+      edgeNo = yTile * (maze.rows * 2 - 1) + (xTile * 2)
+               + (xTile != maze.cols - 1 ? 1 : 0);
+      break;
+    case 'E':
+      edgeNo = yTile * (maze.rows * 2 - 1)
+               + (xTile * (yTile != maze.rows - 1 ? 2 : 1));
+      break;
+    case 'W':
+      edgeNo = yTile * (maze.rows * 2 - 1)
+               + ((xTile - 1) * (yTile != maze.rows - 1 ? 2 : 1));
+      break;
+  }
+
+  return !maze.edges[edgeNo].active;
+}
+
+function getTileNo(x, y)
+{ return y * maze.cols + x; }
+
+function getXTile(mNo)
+{
+  return Math.floor(maze.cols / 2)
+         + Math.floor(monster.arr[mNo].position.x / sq);
+}
+
+function getYTile(mNo)
+{
+  return Math.floor(maze.rows / 2)
+         - Math.ceil(monster.arr[mNo].position.y / sq);
+}
+
+function getRandDirs(dirs)
+{
+  var rando, randDirs = [];
+
+  while (dirs.length > 0)
+  {
+    rando = getRandInt(0, dirs.length - 1);
+    randDirs.push(dirs[rando]);
+    dirs.splice(rando, 1);
+  }
+
+  return randDirs;
+}
+
+function isMoving(mNo)
+{
+  return !((monster.arr[mNo].position.x + (maze.cols % 2 === 0 ? sq/2 : 0)) % sq === 0
+        && (monster.arr[mNo].position.y + (maze.rows % 2 === 0 ? sq/2 : 0)) % sq === 0)
+}
+
+function moveMnstr(mNo)
+{
+  switch (monster.dir[mNo])
+  {
+    case 'N':
+      monster.arr[mNo].position.y += mvDist;
+      break;
+    case 'S':
+      monster.arr[mNo].position.y -= mvDist;
+      break;
+    case 'E':
+      monster.arr[mNo].position.x += mvDist;
+      break;
+    case 'W':
+      monster.arr[mNo].position.x -= mvDist;
+      break;
+  }
+}
+
+function floatMonsters()
+{
+  for (var i = 0; i < monster.arr.length; i++)
+  {
+    monster.arr[i].__dirtyPosition = true;
+
+    monster.arr[i].position.z = (1/2) + radius + (1/2) * Math.cos(monstFloat);
+    monstFloat += 2 * Math.PI / 180;
+    if (monstFloat >= 2 * Math.PI)
+      monstFloat = 0;
   }
 }
 
 function createDiamonds()
 {
   var geo = new THREE.SphereGeometry((3/4) * radius, 4, 2);
-  var mesh = new THREE.MeshBasicMaterial({color: "blue", opacity: 0.8,
+  var mesh = new THREE.MeshBasicMaterial({color: "blue", opacity: 0.6,
     transparent: true});
   var lgeo = new THREE.EdgesGeometry(geo);
   var lmesh = new THREE.LineBasicMaterial({color: "black"});
@@ -442,6 +642,7 @@ function collectDiamonds()
     scene.remove(diamond_edge[0]);
     score++;
     scoreStr += "&nbsp;&#9672;";
+    speedInc = true;
   }
   else if (scene.getObjectByName("Diamond1")
            && Math.abs(player.position.x - firstcol) < ((4/3) * radius)
@@ -451,6 +652,7 @@ function collectDiamonds()
     scene.remove(diamond_edge[1]);
     score++;
     scoreStr += "&nbsp;&#9672;";
+    speedInc = true;
   }
 }
 
@@ -517,17 +719,17 @@ function addLights()
 function keyboardControls()
 {
   // Player motion controls
-  if (Key.isDown(Key.W)) //                                         Move forward
+  if (Key.isDown(Key.W) && player.position.z < radius + 0.1) //     Move forward
     player.applyCentralImpulse(new THREE.Vector3(
       -Math.sin(camera.rotation.y), Math.cos(camera.rotation.y), 0));
-  if (Key.isDown(Key.S)) //                                        Move backward
+  if (Key.isDown(Key.S) && player.position.z < radius + 0.1) //    Move backward
     player.applyCentralImpulse(new THREE.Vector3(
       Math.sin(camera.rotation.y), -Math.cos(camera.rotation.y), 0));
-  if (Key.isDown(Key.A)) //                                          Strafe left
+  if (Key.isDown(Key.A) && player.position.z < radius + 0.1) //      Strafe left
     player.applyCentralImpulse(new THREE.Vector3(
       -Math.sin(Math.PI/2 + camera.rotation.y),
       Math.cos(Math.PI/2 + camera.rotation.y), 0));
-  if (Key.isDown(Key.D)) //                                         Strafe right
+  if (Key.isDown(Key.D) && player.position.z < radius + 0.1) //     Strafe right
     player.applyCentralImpulse(new THREE.Vector3(
       Math.sin(Math.PI/2 + camera.rotation.y),
       -Math.cos(Math.PI/2 + camera.rotation.y), 0));
@@ -584,17 +786,18 @@ function updateScore()
 
 function checkGameStatus()
 {
-  if (gameOver)
+  if (alive)
   {
-    if (alive)
+    if (gameOver)
     {
       gameOverScreen();
       jump = 1.8;
     }
-    else // if (!alive)
-    {
-      gameOverScreen();
-    }
+  }
+  else // if (!alive)
+  {
+    gameOver = true;
+    gameOverScreen();
   }
 }
 
@@ -606,7 +809,7 @@ function gameOverScreen()
   else
     document.getElementById('gameOver').innerHTML =
       "<br>YOU LOSE"
-      + "<br>Refresh to try again!";
+      + "<br><sm>Refresh to try again</sm>";
 }
 
 function helpMenu()
@@ -619,8 +822,9 @@ function helpMenu()
         + "<br>&nbsp;in each corner,"
       + "<br>&nbsp;then get to the far"
         + "<br>&nbsp;corner to win!</br>"
-      + "<br>Jump on top of an "
+      + "<br>Jump on top of your"
         + "<br>&nbsp;enemy to avoid harm!</br>"
+
       + "<br><u>Controls</u>"
       + "<br>Arrow keys&nbsp;: Camera"
       + "<br>&nbsp;&nbsp;&nbsp;WASD&nbsp;&nbsp;&nbsp; : Movements"
@@ -767,51 +971,6 @@ function isConnectedNode(graph, id_a, id_b) // Dijkstra
   }
 
   return known[id_b];
-}
-
-function printMaze(maze)
-{
-  var str0 = "";
-
-  for (var j = 0; j < maze.cols; j++)
-    str0 += "---";
-
-  console.log(str0 + "-");
-
-  for (var i = 0; i < maze.rows; i++)
-  {
-    var str1 = "|", str2 = "|";
-
-    for (var j = 0; j < (maze.cols - 1); j++)
-      str1 += ("  " + (isInEdges(maze, (i * maze.cols + j),
-                      (i * maze.cols + j + 1)) ? "|" : " "));
-
-    if (i < maze.rows - 1)
-      for (var j = 0; j < maze.cols; j++)
-        str2 += ((isInEdges(maze, (i * maze.cols + j),
-                            ((i + 1) * maze.cols + j)) ? "--" : "  ")
-                + ((j < maze.cols - 1) ? "+" : ""));
-
-    console.log(str1 + "  |");
-    if (maze.rows - i > 1)
-      console.log(str2 + "|");
-  }
-
-  console.log(str0 + "-");
-}
-
-function isInEdges(maze, id_a, id_b) // Helper to printMaze()
-{
-  for (var i = 0; i < maze.edges.length; i++)
-    if (maze.edges[i].a === id_a && maze.edges[i].b === id_b)
-    {
-      if (maze.edges[i].active || maze.edges[i].active === null)
-        return true;
-      else
-        return false;
-    }
-
-  return true;
 }
 
 function getRandEdge(graph) // Helper to isConnectedNode()

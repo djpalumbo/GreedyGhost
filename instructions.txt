@@ -4,10 +4,10 @@ For a grade of C, you need the following:
 √  3. A moving camera that moves you through the maze
 √  4. (Optional) A Physijs compliant physics-based 3D world
    5. Sounds and optional music
-   6. At least four objects that chase you.
-   7. Pellets in halls to eat
+√  6. At least four objects that chase you.
+√  7. Pellets in halls to eat
    8. 3D text
-   9. Score
+√  9. Score
 √ 10. Simple help for play keys
 √ 11. Your name somewhere in the game
 √ 12. A CSS file for your styles
@@ -16,5 +16,5 @@ Going past a grade of C, you can add any combination of the following (you don't
   need them all to get 100):
 √  1. The ability to jump or something similar
    2. Music
-   3. Changing chaser colors and speeds.
+/  3. Changing chaser colors and speeds.
 
